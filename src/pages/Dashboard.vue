@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useUiStore } from '@/stores/ui'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useAlertsStore } from '@/stores/alerts'
+import { useUserStore } from '@/stores/user'
 import type { AlertType } from '@/types'
 import {
   mockGetKpi,
@@ -12,6 +13,8 @@ import {
   mockGetProvinceDrillData,
   PROVINCES,
   VACCINE_TYPES,
+  getVisibleProvinceCodes,
+  filterByProvince,
   type KpiData,
   type ProvinceColdData,
   type CoverageRank,
@@ -48,6 +51,20 @@ const router = useRouter()
 const uiStore = useUiStore()
 const dashboardStore = useDashboardStore()
 const alertsStore = useAlertsStore()
+const userStore = useUserStore()
+
+function seededRand(seed: number): () => number {
+  let s = seed
+  return () => {
+    s = (s * 9301 + 49297) % 233280
+    return s / 233280
+  }
+}
+
+function seededBetween(rand: () => number, min: number, max: number, decimals = 1): number {
+  const factor = Math.pow(10, decimals)
+  return Math.round((rand() * (max - min) + min) * factor) / factor
+}
 
 const PAGE_KEY = 'dashboard'
 
@@ -69,11 +86,20 @@ const selectedProvinceName = computed(() => {
   return p ? p.name : '全国'
 })
 
+const visibleProvinceCodes = computed(() => getVisibleProvinceCodes(userStore.userInfo))
+
 const filteredProvinces = computed(() => {
   const q = provinceSearch.value.trim()
-  const list = [{ code: '', name: '全国' }, ...PROVINCES]
-  if (!q) return list
-  return list.filter((p) => p.name.includes(q) || p.code.includes(q))
+  const user = userStore.userInfo
+  let baseList: { code: string; name: string }[]
+  if (user && user.level === 1) {
+    baseList = [{ code: '', name: '全国' }, ...PROVINCES]
+  } else {
+    const codes = visibleProvinceCodes.value
+    baseList = PROVINCES.filter(p => codes.includes(p.code))
+  }
+  if (!q) return baseList
+  return baseList.filter((p) => p.name.includes(q) || p.code.includes(q))
 })
 
 function toggleProvince(code: string) {
@@ -194,12 +220,10 @@ const temperatureTrendXData = computed(() => {
 })
 
 const temperatureTrendSeries = computed(() => {
-  const avg = provinceData.value.length > 0
-    ? provinceData.value.map(() => 90 + Math.round(Math.random() * 90) / 10)
-    : [95.2, 94.8, 96.1, 95.5, 96.3, 95.8, 96.7]
-  const top3 = provinceData.value.length > 0
-    ? provinceData.value.map(() => 93 + Math.round(Math.random() * 65) / 10)
-    : [97.1, 96.8, 97.5, 97.2, 97.8, 97.5, 98.1]
+  const seedCode = userStore.userInfo?.provinceCode ? parseInt(userStore.userInfo.provinceCode) : 100000
+  const rand = seededRand(seedCode)
+  const avg = [95.2, 94.8, 96.1, 95.5, 96.3, 95.8, 96.7].map(v => seededBetween(rand, v - 0.5, v + 0.5, 1))
+  const top3 = [97.1, 96.8, 97.5, 97.2, 97.8, 97.5, 98.1].map(v => seededBetween(rand, v - 0.3, v + 0.3, 1))
   return [
     { name: '全国均值', data: avg, color: '#1890FF', area: true },
     { name: '省份TOP3', data: top3, color: '#52C41A' },
@@ -208,28 +232,39 @@ const temperatureTrendSeries = computed(() => {
 
 const provinceTempChartData = computed(() => {
   if (!provinceDrill.value?.tempChartData || provinceDrill.value.tempChartData.length === 0) {
-    return { xData: [], series: [] }
+    return { xData: [], series: [], threshold: undefined }
   }
   const raw = provinceDrill.value.tempChartData
-  const timeMap = new Map<string, number[]>()
+
+  const xSet = new Set<string>()
+  const storeMap = new Map<string, Map<string, number>>()
+  let targetMin = Infinity
+  let targetMax = -Infinity
+
   raw.forEach((p) => {
     const timeKey = p.time.slice(5, 13)
-    if (!timeMap.has(timeKey)) timeMap.set(timeKey, [])
-    timeMap.get(timeKey)!.push(p.temp)
+    xSet.add(timeKey)
+    if (!storeMap.has(p.coldStoreName)) {
+      storeMap.set(p.coldStoreName, new Map())
+    }
+    storeMap.get(p.coldStoreName)!.set(timeKey, p.temp)
+    if (p.targetTempMin !== undefined && p.targetTempMin < targetMin) targetMin = p.targetTempMin
+    if (p.targetTempMax !== undefined && p.targetTempMax > targetMax) targetMax = p.targetTempMax
   })
-  const xData = Array.from(timeMap.keys())
-  const avgData = xData.map((timeKey) => {
-    const temps = timeMap.get(timeKey) || [5]
-    return Number((temps.reduce((a, b) => a + b, 0) / Math.max(temps.length, 1)).toFixed(1))
-  })
+
+  const xData = Array.from(xSet).sort()
+  const colors = ['#1890FF', '#52C41A', '#FAAD14', '#722ED1', '#F5222D', '#13C2C2', '#EB2F96', '#FA8C16']
+  const series = Array.from(storeMap.entries()).map(([name, timeMap], idx) => ({
+    name,
+    data: xData.map((t) => timeMap.get(t) ?? null),
+    color: colors[idx % colors.length],
+    area: idx === 0,
+  }))
+
   return {
-    xData: xData.slice(0, 24),
-    series: [{
-      name: '平均温度',
-      data: xData.map(() => 2 + Math.round(Math.random() * 60) / 10),
-      color: '#1890FF',
-      area: true,
-    }],
+    xData,
+    series,
+    threshold: targetMin < targetMax ? { min: targetMin, max: targetMax } : undefined,
   }
 })
 
@@ -255,27 +290,31 @@ function getAlertStatusText(status: string) {
   return map[status] || status
 }
 
+function refreshRecentAlerts() {
+  const provCodes = visibleProvinceCodes.value
+  const allAlerts = [...alertsStore.pendingL1, ...alertsStore.pendingL2].map((a: any) => ({
+    ...a,
+    typeName: getAlertTypeName(a.type),
+    provinceCode: PROVINCES.find(p => p.name === a.province)?.code ?? '',
+    cityCode: '',
+  }))
+  recentAlerts.value = filterByProvince(allAlerts, provCodes).slice(0, 4)
+}
+
 async function loadAllData(showLoading = true) {
   if (showLoading) uiStore.beginLoading(PAGE_KEY)
   try {
     const province = dashboardStore.selectedProvince
       ? PROVINCES.find((p) => p.code === dashboardStore.selectedProvince)?.name
       : undefined
+    const provCodes = visibleProvinceCodes.value
+    const vaccineCode = rankVaccineCode.value === 'ALL' ? undefined : rankVaccineCode.value
 
     kpiData.value = mockGetKpi(province)
-    provinceData.value = mockGetProvinceData()
-    coverageRank.value = mockGetCoverageRank(
-      rankVaccineCode.value === 'ALL' ? undefined : rankVaccineCode.value
-    )
-    recentAlerts.value = (alertsStore.pendingL1.length
-      ? [...alertsStore.pendingL1, ...alertsStore.pendingL2]
-      : (await alertsStore.fetchAlerts()).pendingL1.concat((await alertsStore.fetchAlerts()).pendingL2)
-    ).map((a: any) => ({
-      ...a,
-      typeName: getAlertTypeName(a.type),
-      provinceCode: PROVINCES.find(p => p.name === a.province)?.code ?? '',
-      cityCode: '',
-    })).slice(0, 4)
+    provinceData.value = mockGetProvinceData(provCodes)
+    coverageRank.value = mockGetCoverageRank(vaccineCode, provCodes)
+    await alertsStore.fetchAlerts()
+    refreshRecentAlerts()
   } finally {
     if (showLoading) uiStore.endLoading(PAGE_KEY)
   }
@@ -286,7 +325,11 @@ function refreshAll() {
 }
 
 watch(rankVaccineCode, () => {
-  coverageRank.value = mockGetCoverageRank(rankVaccineCode.value === 'ALL' ? undefined : rankVaccineCode.value)
+  const provCodes = visibleProvinceCodes.value
+  coverageRank.value = mockGetCoverageRank(
+    rankVaccineCode.value === 'ALL' ? undefined : rankVaccineCode.value,
+    provCodes
+  )
 })
 
 watch(
@@ -296,8 +339,14 @@ watch(
   }
 )
 
+watch(
+  () => [alertsStore.pendingL1.length, alertsStore.pendingL2.length],
+  () => {
+    refreshRecentAlerts()
+  }
+)
+
 onMounted(() => {
-  alertsStore.fetchAlerts()
   setTimeRange('7d')
   loadAllData(true)
 })
@@ -673,6 +722,7 @@ onBeforeUnmount(() => {
                     v-if="provinceDrill?.tempChartData && provinceDrill.tempChartData.length > 0"
                     :x-data="provinceTempChartData.xData"
                     :series="provinceTempChartData.series"
+                    :threshold="provinceTempChartData.threshold"
                     y-unit="℃"
                   />
                 </div>

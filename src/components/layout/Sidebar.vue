@@ -20,11 +20,13 @@ import {
 } from 'lucide-vue-next'
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
+import { useAlertsStore } from '@/stores/alerts'
 
 const route = useRoute()
 const router = useRouter()
 const uiStore = useUiStore()
 const userStore = useUserStore()
+const alertsStore = useAlertsStore()
 
 const menuGroups = [
   {
@@ -45,8 +47,8 @@ const menuGroups = [
   {
     title: '预警与规划',
     items: [
-      { path: '/alerts', icon: AlertTriangle, title: '预警中心', level: 3 },
-      { path: '/alerts/approval', icon: FileCheck, title: '审批工作台', level: 3 },
+      { path: '/alerts', icon: AlertTriangle, title: '预警中心', level: 3, badge: 'alerts' },
+      { path: '/alerts/approval', icon: FileCheck, title: '审批工作台', level: 3, badge: 'approval' },
       { path: '/plan', icon: CalendarCheck, title: '免疫规划', level: 2 },
       { path: '/plan/forecast', icon: TrendingUp, title: '缺口预测', level: 2 },
     ],
@@ -62,6 +64,30 @@ const menuGroups = [
 
 const currentPath = computed(() => route.path)
 const userLevel = computed(() => userStore.userLevel)
+
+const alertsBadgeCount = computed(() => {
+  return alertsStore.pendingL1.length + alertsStore.pendingL2.length
+})
+
+const approvalBadgeCount = computed(() => {
+  const user = userStore.userInfo
+  if (!user) return 0
+  let count = 0
+  const approvals = alertsStore.myApprovals
+  for (const flow of approvals) {
+    if (user.role === 'COLD_CHAIN' && flow.currentStep === 'ADMIN_CONFIRM') count++
+    else if ((user.level === 3 || user.role === 'CITY') && flow.currentStep === 'CITY_REVIEW') count++
+    else if ((user.level === 2 || user.role === 'PROVINCE') && flow.currentStep === 'PROVINCE_APPROVE') count++
+    else if (user.level === 1) count++
+  }
+  return count
+})
+
+function getBadgeCount(badgeType?: string): number {
+  if (badgeType === 'alerts') return alertsBadgeCount.value
+  if (badgeType === 'approval') return approvalBadgeCount.value
+  return 0
+}
 
 const isDisabled = (level: number) => level < userLevel.value
 const isActive = (path: string) => currentPath.value === path || currentPath.value.startsWith(path + '/')
@@ -140,11 +166,25 @@ const handleNavClick = (item: { path: string; level: number }) => {
                 </span>
               </Transition>
               <Transition name="slide-fade">
-                <Lock
-                  v-if="!uiStore.sidebarCollapsed && isDisabled(item.level)"
-                  class="w-3.5 h-3.5 text-text-tertiary"
-                />
+                <template v-if="!uiStore.sidebarCollapsed">
+                  <span
+                    v-if="getBadgeCount((item as any).badge) > 0"
+                    class="min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold text-white flex items-center justify-center shrink-0"
+                    style="background: linear-gradient(135deg, #F5222D 0%, #CF1322 100%); box-shadow: 0 0 6px rgba(245,34,45,0.5)"
+                  >
+                    {{ getBadgeCount((item as any).badge) > 99 ? '99+' : getBadgeCount((item as any).badge) }}
+                  </span>
+                  <Lock
+                    v-if="isDisabled(item.level)"
+                    class="w-3.5 h-3.5 text-text-tertiary"
+                  />
+                </template>
               </Transition>
+              <span
+                v-if="uiStore.sidebarCollapsed && getBadgeCount((item as any).badge) > 0"
+                class="absolute top-1.5 right-1.5 min-w-[8px] h-[8px] rounded-full"
+                style="background: #F5222D; box-shadow: 0 0 4px rgba(245,34,45,0.6)"
+              />
             </button>
           </li>
         </ul>

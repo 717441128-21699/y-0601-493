@@ -23,7 +23,7 @@ import {
   Award,
   Building2,
 } from 'lucide-vue-next'
-import { PROVINCES, VACCINE_TYPES } from '@/mock'
+import { PROVINCES, VACCINE_TYPES, getVisibleProvinceCodes, filterByProvince, getVisibleCityCodes, filterByCity } from '@/mock'
 import {
   mockGetVaccinationRecords,
   mockGetTimelyRate,
@@ -32,7 +32,12 @@ import {
   type VaccinationRecord,
   type AgeDistribution,
 } from '@/mock'
+import { useUserStore } from '@/stores/user'
 import { ref, computed, onMounted } from 'vue'
+
+const userStore = useUserStore()
+const visibleProvinceCodes = computed(() => getVisibleProvinceCodes(userStore.userInfo))
+const visibleCityCodes = computed(() => getVisibleCityCodes(userStore.userInfo))
 
 const provinceDropdownOpen = ref(false)
 const vaccineDropdownOpen = ref(false)
@@ -81,9 +86,16 @@ const selectedAgeGroupName = computed(() => {
 
 const filteredProvinces = computed(() => {
   const q = provinceSearch.value.trim()
-  const list = [{ code: '', name: '全国' }, ...PROVINCES]
-  if (!q) return list
-  return list.filter((p) => p.name.includes(q) || p.code.includes(q))
+  const user = userStore.userInfo
+  let baseList: { code: string; name: string }[]
+  if (user && user.level === 1) {
+    baseList = [{ code: '', name: '全国' }, ...PROVINCES]
+  } else {
+    const codes = visibleProvinceCodes.value
+    baseList = PROVINCES.filter(p => codes.includes(p.code))
+  }
+  if (!q) return baseList
+  return baseList.filter((p) => p.name.includes(q) || p.code.includes(q))
 })
 
 function toggleProvince(code: string) {
@@ -117,8 +129,13 @@ function loadData() {
   if (selectedAgeGroup.value) params.ageGroup = selectedAgeGroup.value
   if (keyword.value) params.keyword = keyword.value
 
+  const provCodes = visibleProvinceCodes.value
+  const cityCodes = visibleCityCodes.value
+
   const result = mockGetVaccinationRecords(params)
-  records.value = result.list
+  let list = filterByProvince(result.list, provCodes)
+  list = filterByCity(list, cityCodes)
+  records.value = list
 
   stats.value = mockGetVaccinationStats()
   timelyRate.value = mockGetTimelyRate(selectedVaccine.value || undefined, selectedProvince.value || undefined)

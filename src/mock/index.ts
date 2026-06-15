@@ -1,4 +1,5 @@
 export * from './_provinces.js';
+export * from './_filters.js';
 
 export {
   mockLogin,
@@ -111,6 +112,11 @@ import {
   mockGetMyApprovals as _mockGetMyApprovals,
   mockApproveStep,
   mockCloseAlert,
+  mockGetFlowById,
+  checkEscalateL2,
+  mockHandleAlertV2,
+  mockApproveStepV2,
+  mockGetAlertById,
 } from './alerts.mock.js';
 
 export {
@@ -119,6 +125,11 @@ export {
   mockHandleAlert,
   mockApproveStep,
   mockCloseAlert,
+  mockGetFlowById,
+  checkEscalateL2,
+  mockHandleAlertV2,
+  mockApproveStepV2,
+  mockGetAlertById,
 };
 export type {
   AlertLevel,

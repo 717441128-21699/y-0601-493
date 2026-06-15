@@ -111,8 +111,11 @@ export function mockGetKpi(province?: string): KpiData[] {
   ];
 }
 
-export function mockGetProvinceData(): ProvinceColdData[] {
-  return PROVINCES.map((p, idx) => {
+export function mockGetProvinceData(provinceCodes?: string[]): ProvinceColdData[] {
+  const provinces = provinceCodes && provinceCodes.length > 0
+    ? PROVINCES.filter(p => provinceCodes.includes(p.code))
+    : PROVINCES;
+  return provinces.map((p, idx) => {
     const rand = seededRand(parseInt(p.code) + idx * 7);
     const tempRate = seededBetween(rand, 75, 99.5, 1);
     const coverageRate = seededBetween(rand, 60, 98, 1);
@@ -130,30 +133,22 @@ export function mockGetProvinceData(): ProvinceColdData[] {
   });
 }
 
-export function mockGetCoverageRank(vaccineType?: string): CoverageRank[] {
+export function mockGetCoverageRank(vaccineType?: string, provinceCodes?: string[]): CoverageRank[] {
   const vaccineCode = vaccineType || 'ALL';
   const seedBase = vaccineCode.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+  const provinces = provinceCodes && provinceCodes.length > 0
+    ? PROVINCES.filter(p => provinceCodes.includes(p.code))
+    : PROVINCES;
 
-  const results: CoverageRank[] = [];
-  const usedCodes = new Set<string>();
-
-  while (results.length < 10) {
-    const idx = Math.floor(Math.random() * PROVINCES.length);
-    const p = PROVINCES[idx];
-    if (usedCodes.has(p.code)) continue;
-    usedCodes.add(p.code);
-
+  const allWithRate = provinces.map(p => {
     const rand = seededRand(parseInt(p.code) + seedBase);
     const rate = seededBetween(rand, 70, 99.5, 1);
+    return { name: p.name, code: p.code, rate };
+  });
 
-    results.push({
-      name: p.name,
-      code: p.code,
-      rate: rate,
-    });
-  }
-
-  return results.sort((a, b) => b.rate - a.rate);
+  return allWithRate
+    .sort((a, b) => b.rate - a.rate)
+    .slice(0, Math.min(10, allWithRate.length));
 }
 
 export function mockGetProvinceDrillData(provinceCode: string): ProvinceDrillData {

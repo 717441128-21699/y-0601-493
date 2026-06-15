@@ -20,12 +20,17 @@ import {
   History,
   Phone,
 } from 'lucide-vue-next'
-import { PROVINCES, CITIES } from '@/mock'
+import { PROVINCES, CITIES, getVisibleProvinceCodes, filterByProvince, filterByCity, getVisibleCityCodes } from '@/mock'
 import {
   mockGetEquipments,
   type Equipment,
 } from '@/mock'
+import { useUserStore } from '@/stores/user'
 import { ref, computed, onMounted, h } from 'vue'
+
+const userStore = useUserStore()
+const visibleProvinceCodes = computed(() => getVisibleProvinceCodes(userStore.userInfo))
+const visibleCityCodes = computed(() => getVisibleCityCodes(userStore.userInfo))
 
 const provinceDropdownOpen = ref(false)
 const typeDropdownOpen = ref(false)
@@ -55,9 +60,16 @@ const selectedProvinceName = computed(() => {
 
 const filteredProvinces = computed(() => {
   const q = provinceSearch.value.trim()
-  const list = [{ code: '', name: '全国' }, ...PROVINCES]
-  if (!q) return list
-  return list.filter((p) => p.name.includes(q) || p.code.includes(q))
+  const user = userStore.userInfo
+  let baseList: { code: string; name: string }[]
+  if (user && user.level === 1) {
+    baseList = [{ code: '', name: '全国' }, ...PROVINCES]
+  } else {
+    const codes = visibleProvinceCodes.value
+    baseList = PROVINCES.filter(p => codes.includes(p.code))
+  }
+  if (!q) return baseList
+  return baseList.filter((p) => p.name.includes(q) || p.code.includes(q))
 })
 
 const typeOptions = [
@@ -114,6 +126,10 @@ function toggleStatus(code: string) {
 
 function loadData() {
   let all = mockGetEquipments()
+  const provCodes = visibleProvinceCodes.value
+  const cityCodes = visibleCityCodes.value
+  all = filterByProvince(all, provCodes)
+  all = filterByCity(all, cityCodes)
   if (selectedProvince.value) {
     all = all.filter((e) => e.provinceCode === selectedProvince.value)
   }

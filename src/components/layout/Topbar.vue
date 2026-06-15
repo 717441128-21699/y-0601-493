@@ -31,21 +31,15 @@ const currentTime = ref(dayjs().format('YYYY-MM-DD HH:mm:ss'))
 const showTooltip = ref(false)
 
 let timeTimer: number | null = null
-let alertsTimer: number | null = null
 
 onMounted(() => {
   timeTimer = window.setInterval(() => {
     currentTime.value = dayjs().format('YYYY-MM-DD HH:mm:ss')
   }, 1000)
-  alertsStore.fetchAlerts()
-  alertsTimer = window.setInterval(() => {
-    alertsStore.fetchAlerts()
-  }, 30000)
 })
 
 onUnmounted(() => {
   if (timeTimer) window.clearInterval(timeTimer)
-  if (alertsTimer) window.clearInterval(alertsTimer)
 })
 
 const breadcrumbs = computed(() => {

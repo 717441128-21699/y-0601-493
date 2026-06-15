@@ -9,6 +9,8 @@ export interface UserInfo {
   role: 'NATIONAL' | 'PROVINCE' | 'CITY' | 'COLD_CHAIN' | 'VACCINE_POINT';
   province?: string;
   city?: string;
+  provinceCode?: string;
+  cityCode?: string;
   permissions: string[];
   avatar?: string;
 }
@@ -110,6 +112,27 @@ export type AlertLevel = 'L1' | 'L2';
 export type AlertType = 'TEMP_OVER' | 'TEMP_UNDER' | 'STOCK_LOW' | 'DEVICE_FAULT';
 export type AlertStatus = 'PENDING' | 'PROCESSING' | 'ESCALATED' | 'APPROVING' | 'CLOSED';
 
+export interface AlertTemperatureData {
+  current: number;
+  min: number;
+  max: number;
+  duration: number;
+  coldStoreName?: string;
+}
+
+export interface AlertStockData {
+  batchNo: string;
+  current: number;
+  threshold: number;
+  vaccineName?: string;
+}
+
+export interface AlertDeviceData {
+  deviceName: string;
+  deviceModel: string;
+  faultType: string;
+}
+
 export interface Alert {
   id: string;
   level: AlertLevel;
@@ -122,13 +145,14 @@ export interface Alert {
   triggerTime: string;
   expireTime: string; // 一级预警处置截止（+2h）
   status: AlertStatus;
-  temperature?: { current: number; min: number; max: number; duration: number };
-  stock?: { batchNo: string; current: number; threshold: number };
+  temperature?: AlertTemperatureData;
+  stock?: AlertStockData;
+  device?: AlertDeviceData;
   handleLogs?: AlertHandleLog[];
   approval?: ApprovalFlow;
-  typeName: string;
-  provinceCode: string;
-  cityCode: string;
+  typeName?: string;
+  provinceCode?: string;
+  cityCode?: string;
   closed?: boolean;
 }
 
@@ -142,6 +166,7 @@ export interface AlertHandleLog {
 
 // 审批流程
 export type ApprovalStep = 'ADMIN_CONFIRM' | 'CITY_REVIEW' | 'PROVINCE_APPROVE';
+export type ApprovalResult = 'TRANSFER' | 'SCRAP';
 
 export interface ApprovalFlow {
   id: string;

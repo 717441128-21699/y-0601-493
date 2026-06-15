@@ -45,6 +45,25 @@ export interface PlanParseResult {
   warnings: string[];
 }
 
+const LS_TARGETS = 'vaccine_plan_targets';
+
+function lsGetTargets(): MonthlyTarget[] | null {
+  try {
+    const raw = localStorage.getItem(LS_TARGETS);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function lsSetTargets(data: MonthlyTarget[]): void {
+  try {
+    localStorage.setItem(LS_TARGETS, JSON.stringify(data));
+  } catch (e) {
+    console.warn('[plan.mock] 保存 targets 到 localStorage 失败', e);
+  }
+}
+
 function seededRand(seed: number): () => number {
   let s = seed;
   return () => {
@@ -56,6 +75,15 @@ function seededRand(seed: number): () => number {
 function seededBetween(rand: () => number, min: number, max: number, decimals = 0): number {
   const factor = Math.pow(10, decimals);
   return Math.round((rand() * (max - min) + min) * factor) / factor;
+}
+
+function hashString(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
+  }
+  return Math.abs(h);
 }
 
 function pad(num: number, size: number): string {
@@ -121,13 +149,6 @@ export function mockParsePlanExcel(fileName?: string): PlanParseResult {
     }
   });
 
-  if (Math.random() > 0.5) {
-    warnings.push('第38行：HPV疫苗10月目标值偏高，建议复核');
-  }
-  if (Math.random() > 0.3) {
-    warnings.push('第72行：流感疫苗季度分配与往年规律存在偏差');
-  }
-
   return {
     year,
     totalTargets: targets.length,
@@ -138,53 +159,71 @@ export function mockParsePlanExcel(fileName?: string): PlanParseResult {
   };
 }
 
-let _currentTargets: MonthlyTarget[] | null = null;
-
 export function mockUpdateTargets(updates: { month: string; vaccineCode: string; targetCount: number }[]): MonthlyTarget[] {
-  if (!_currentTargets) {
-    const parsed = mockParsePlanExcel();
-    _currentTargets = parsed.targets;
-  }
+  const current = mockGetTargets();
 
   updates.forEach(({ month, vaccineCode, targetCount }) => {
-    const idx = _currentTargets!.findIndex((t) => t.month === month && t.vaccineCode === vaccineCode);
+    const idx = current.findIndex((t) => t.month === month && t.vaccineCode === vaccineCode);
     if (idx !== -1) {
-      _currentTargets![idx] = {
-        ..._currentTargets![idx],
+      current[idx] = {
+        ...current[idx],
         targetCount,
-        completionRate: _currentTargets![idx].actualCount
-          ? Math.round((_currentTargets![idx].actualCount! / targetCount) * 1000) / 10
+        completionRate: current[idx].actualCount
+          ? Math.round((current[idx].actualCount! / targetCount) * 1000) / 10
           : undefined,
       };
     }
   });
 
-  return [..._currentTargets];
+  lsSetTargets(current);
+  return [...current];
 }
 
 export function mockGetTargets(year?: number): MonthlyTarget[] {
-  if (!_currentTargets) {
-    const parsed = mockParsePlanExcel();
-    _currentTargets = parsed.targets;
+  const cached = lsGetTargets();
+  if (cached && cached.length > 0) {
+    return [...cached];
   }
-  return [..._currentTargets];
+  const parsed = mockParsePlanExcel();
+  lsSetTargets(parsed.targets);
+  return [...parsed.targets];
 }
 
-export function mockGetForecast90(vaccineCode?: string): ForecastDay[] {
+function getVaccineMonthlyDemand(): Map<string, number> {
+  const targets = mockGetTargets();
+  const demandMap = new Map<string, number>();
+
+  for (const vt of VACCINE_TYPES) {
+    const vtTargets = targets.filter(t => t.vaccineCode === vt.code);
+    if (vtTargets.length > 0) {
+      const total = vtTargets.reduce((s, t) => s + t.targetCount, 0);
+      demandMap.set(vt.code, Math.round(total / 365));
+    } else {
+      const base = VACCINE_BASE_DEMAND[vt.code] || 80000;
+      demandMap.set(vt.code, Math.round(base * 12 / 365));
+    }
+  }
+
+  return demandMap;
+}
+
+export function mockGetForecast90(vaccineCode?: string, provinceCode?: string): ForecastDay[] {
   const result: ForecastDay[] = [];
   const startDate = new Date();
   startDate.setHours(0, 0, 0, 0);
 
+  const dailyDemandMap = getVaccineMonthlyDemand();
   const vaccinesToForecast = vaccineCode
     ? VACCINE_TYPES.filter((v) => v.code === vaccineCode)
     : VACCINE_TYPES;
 
   vaccinesToForecast.forEach((vt, vtIdx) => {
-    const baseDemand = VACCINE_BASE_DEMAND[vt.code] || 80000;
-    const dailyBase = Math.round(baseDemand / 30);
+    const dailyBase = dailyDemandMap.get(vt.code) || 1000;
 
     for (let d = 0; d < 90; d++) {
-      const rand = seededRand(vtIdx * 1000 + d * 31 + 888);
+      const seedKey = `${provinceCode || 'ALL'}-${vt.code}-${d}`;
+      const seed = hashString(seedKey);
+      const rand = seededRand(seed + 888);
       const date = addDays(startDate, d);
 
       const weekday = date.getDay();
@@ -228,8 +267,8 @@ export function mockGetForecast90(vaccineCode?: string): ForecastDay[] {
   return result.sort((a, b) => a.date.localeCompare(b.date));
 }
 
-export function mockGetForecastSummary(vaccineCode?: string) {
-  const forecast = mockGetForecast90(vaccineCode);
+export function mockGetForecastSummary(vaccineCode?: string, provinceCode?: string) {
+  const forecast = mockGetForecast90(vaccineCode, provinceCode);
   const totalDemand = forecast.reduce((sum, f) => sum + f.demand, 0);
   const totalSupply = forecast.reduce((sum, f) => sum + f.supply, 0);
   const totalGap = forecast.reduce((sum, f) => sum + f.gap, 0);
@@ -257,11 +296,13 @@ export function mockGetForecastSummary(vaccineCode?: string) {
     shortageDays,
     warningDays,
     normalDays: 90 - shortageDays - warningDays,
+    totalForecast: Math.round(totalDemand / 10000),
+    highRiskCount: byVaccine.filter(v => v.shortageDays > 10).length,
     byVaccine,
   };
 }
 
-export function mockGetTransferSuggestions(): TransferSuggestion[] {
+export function mockGetTransferSuggestions(provinceCode?: string): TransferSuggestion[] {
   const result: TransferSuggestion[] = [];
   const reasons = [
     '预测90天内缺口较大，建议从库存充裕省份调拨',
@@ -284,7 +325,10 @@ export function mockGetTransferSuggestions(): TransferSuggestion[] {
 
   while (count < 15 && attempt < 200) {
     attempt++;
-    const rand = seededRand(attempt * 17 + count * 41 + 999);
+    const seedKey = `${provinceCode || 'ALL'}-transfer-${attempt}-${count}`;
+    const seed = hashString(seedKey);
+    const rand = seededRand(seed + 999);
+
     const fromIdx = Math.floor(rand() * PROVINCES.length);
     let toIdx = Math.floor(rand() * PROVINCES.length);
     if (toIdx === fromIdx) toIdx = (toIdx + 1) % PROVINCES.length;

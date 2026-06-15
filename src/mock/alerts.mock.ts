@@ -77,6 +77,43 @@ export interface Alert {
   approval?: ApprovalFlow;
 }
 
+const LS_ALERTS = 'vaccine_mock_alerts';
+const LS_APPROVALS = 'vaccine_mock_approvals';
+
+function lsGetAlerts(): Alert[] | null {
+  try {
+    const raw = localStorage.getItem(LS_ALERTS);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function lsSetAlerts(alerts: Alert[]): void {
+  try {
+    localStorage.setItem(LS_ALERTS, JSON.stringify(alerts));
+  } catch (e) {
+    console.warn('[alerts.mock] 保存 alerts 到 localStorage 失败', e);
+  }
+}
+
+function lsGetApprovals(): ApprovalFlow[] | null {
+  try {
+    const raw = localStorage.getItem(LS_APPROVALS);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function lsSetApprovals(approvals: ApprovalFlow[]): void {
+  try {
+    localStorage.setItem(LS_APPROVALS, JSON.stringify(approvals));
+  } catch (e) {
+    console.warn('[alerts.mock] 保存 approvals 到 localStorage 失败', e);
+  }
+}
+
 function seededRand(seed: number): () => number {
   let s = seed;
   return () => {
@@ -124,8 +161,6 @@ function addMinutes(date: Date, minutes: number): Date {
   d.setMinutes(d.getMinutes() + minutes);
   return d;
 }
-
-let _alertsCache: Alert[] | null = null;
 
 function generateAlerts(): Alert[] {
   const result: Alert[] = [];
@@ -329,17 +364,21 @@ function generateAlerts(): Alert[] {
     });
   }
 
-  return result.sort((a, b) => b.triggerTime.localeCompare(a.triggerTime));
+  const sorted = result.sort((a, b) => b.triggerTime.localeCompare(a.triggerTime));
+  lsSetAlerts(sorted);
+  return sorted;
 }
 
 function getAlerts(): Alert[] {
-  if (!_alertsCache) {
-    _alertsCache = generateAlerts();
+  const cached = lsGetAlerts();
+  if (cached && cached.length > 0) {
+    return cached;
   }
-  return _alertsCache;
+  return generateAlerts();
 }
 
 export function mockGetAlerts(level?: AlertLevel): Alert[] {
+  checkEscalateL2();
   let all = getAlerts();
   if (level) {
     all = all.filter((a) => a.level === level);
@@ -348,6 +387,7 @@ export function mockGetAlerts(level?: AlertLevel): Alert[] {
 }
 
 export function mockGetAlertStats() {
+  checkEscalateL2();
   const all = getAlerts();
   return {
     total: all.length,
@@ -378,10 +418,12 @@ export function mockHandleAlert(id: string, remark: string): Alert | null {
     time: formatDateTime(new Date()),
   });
 
+  lsSetAlerts(all);
   return { ...alert };
 }
 
 export function mockGetMyApprovals(userLevel?: 1 | 2 | 3): ApprovalFlow[] {
+  checkEscalateL2();
   const all = getAlerts();
   const approvals: ApprovalFlow[] = [];
 
@@ -403,6 +445,22 @@ export function mockGetMyApprovals(userLevel?: 1 | 2 | 3): ApprovalFlow[] {
   }
 
   return approvals;
+}
+
+export function mockGetFlowById(id: string): ApprovalFlow | null {
+  checkEscalateL2();
+  const all = getAlerts();
+  for (const alert of all) {
+    if (alert.approval && alert.approval.id === id) {
+      return { ...alert.approval };
+    }
+  }
+  const cachedApprovals = lsGetApprovals();
+  if (cachedApprovals) {
+    const flow = cachedApprovals.find((f) => f.id === id);
+    return flow ? { ...flow } : null;
+  }
+  return null;
 }
 
 export function mockApproveStep(
@@ -432,6 +490,9 @@ export function mockApproveStep(
       } else if (pass && currentIdx === stepOrder.length - 1) {
         flow.result = alert.stock ? 'TRANSFER' : 'SCRAP';
         alert.status = 'CLOSED';
+        if (alert.approval) {
+          alert.approval.result = flow.result;
+        }
         alert.handleLogs.push({
           operator: '系统',
           role: '系统',
@@ -450,6 +511,7 @@ export function mockApproveStep(
         });
       }
 
+      lsSetAlerts(all);
       return { ...flow };
     }
   }
@@ -471,5 +533,170 @@ export function mockCloseAlert(id: string, closeRemark: string): Alert | null {
     time: formatDateTime(new Date()),
   });
 
+  lsSetAlerts(all);
   return { ...alert };
+}
+
+export function checkEscalateL2(): number {
+  const all = getAlerts();
+  const now = new Date();
+  let escalatedCount = 0;
+
+  for (const alert of all) {
+    if (alert.level === 'L1' && alert.status !== 'CLOSED') {
+      const expireTimeStr = alert.expireTime.replace(' ', 'T');
+      const expire = new Date(expireTimeStr);
+      if (now.getTime() >= expire.getTime() && alert.status !== 'ESCALATED' && alert.status !== 'APPROVING') {
+        alert.level = 'L2';
+        alert.status = 'ESCALATED';
+        alert.handleLogs.unshift({
+          operator: '系统',
+          role: '系统',
+          action: '超时升级',
+          remark: 'L1预警处置超时，自动升级为L2二级预警，请尽快进入审批工作台处理',
+          time: formatDateTime(now),
+        });
+
+        if (!alert.approval) {
+          const ts = Date.now();
+          const approvalId = `APR${String(ts % 1000000).padStart(6, '0')}`;
+          alert.approval = {
+            id: approvalId,
+            alertId: alert.id,
+            currentStep: 'ADMIN_CONFIRM',
+            steps: [
+              {
+                step: 'ADMIN_CONFIRM',
+                stepName: STEP_NAMES.ADMIN_CONFIRM,
+                operator: '',
+                operatorRole: '冷链管理员',
+                opinion: '',
+                status: 'PENDING',
+              },
+              {
+                step: 'CITY_REVIEW',
+                stepName: STEP_NAMES.CITY_REVIEW,
+                operator: '',
+                operatorRole: '市级疾控',
+                opinion: '',
+                status: 'PENDING',
+              },
+              {
+                step: 'PROVINCE_APPROVE',
+                stepName: STEP_NAMES.PROVINCE_APPROVE,
+                operator: '',
+                operatorRole: '省级卫健委',
+                opinion: '',
+                status: 'PENDING',
+              },
+            ],
+          };
+        }
+        escalatedCount++;
+      }
+    }
+  }
+
+  if (escalatedCount > 0) {
+    lsSetAlerts(all);
+  }
+  return escalatedCount;
+}
+
+export function mockHandleAlertV2(id: string, remark: string, actionType: string = '处置措施'): Alert | null {
+  const all = getAlerts();
+  const alert = all.find((a) => a.id === id);
+  if (!alert) return null;
+
+  alert.status = alert.level === 'L2' ? 'APPROVING' : 'PROCESSING';
+  alert.handleLogs.unshift({
+    operator: '当前用户',
+    role: '处置人员',
+    action: actionType,
+    remark,
+    time: formatDateTime(new Date()),
+  });
+
+  lsSetAlerts(all);
+  return { ...alert };
+}
+
+export function mockApproveStepV2(
+  approvalId: string,
+  step: ApprovalStep,
+  opinion: string,
+  pass: boolean = true,
+  result?: ApprovalResult
+): ApprovalFlow | null {
+  const all = getAlerts();
+
+  for (const alert of all) {
+    if (alert.approval && alert.approval.id === approvalId) {
+      const flow = alert.approval;
+      const node = flow.steps.find((s) => s.step === step);
+      if (!node) return null;
+
+      node.status = pass ? 'APPROVED' : 'REJECTED';
+      node.opinion = opinion;
+      node.time = formatDateTime(new Date());
+
+      const stepOrder: ApprovalStep[] = ['ADMIN_CONFIRM', 'CITY_REVIEW', 'PROVINCE_APPROVE'];
+      const currentIdx = stepOrder.indexOf(step);
+
+      if (pass && currentIdx < stepOrder.length - 1) {
+        flow.currentStep = stepOrder[currentIdx + 1];
+        alert.status = 'APPROVING';
+        alert.handleLogs.unshift({
+          operator: node.operator || '审批人员',
+          role: node.operatorRole || STEP_NAMES[step],
+          action: `通过${STEP_NAMES[step]}`,
+          remark: opinion,
+          time: formatDateTime(new Date()),
+        });
+      } else if (pass && currentIdx === stepOrder.length - 1) {
+        flow.result = result || (alert.stock ? 'TRANSFER' : 'SCRAP');
+        alert.status = 'CLOSED';
+        alert.approval = { ...flow, result: flow.result };
+        alert.handleLogs.unshift({
+          operator: '系统',
+          role: '系统',
+          action: '审批完成',
+          remark: `三级审批全部通过，执行${flow.result === 'TRANSFER' ? '紧急调拨' : '报废'}`,
+          time: formatDateTime(new Date()),
+        });
+      } else if (!pass) {
+        const stepOrderReversed: ApprovalStep[] = ['PROVINCE_APPROVE', 'CITY_REVIEW', 'ADMIN_CONFIRM'];
+        const reverseIdx = stepOrderReversed.indexOf(step);
+        if (reverseIdx < stepOrderReversed.length - 1) {
+          flow.currentStep = stepOrderReversed[reverseIdx + 1];
+          const prevNode = flow.steps.find((s) => s.step === flow.currentStep);
+          if (prevNode) {
+            prevNode.status = 'PENDING';
+            prevNode.opinion = '';
+            prevNode.time = undefined;
+          }
+        }
+        alert.status = 'APPROVING';
+        alert.handleLogs.unshift({
+          operator: node.operator || '审批人员',
+          role: node.operatorRole || STEP_NAMES[step],
+          action: `退回${STEP_NAMES[step]}`,
+          remark: `退回理由: ${opinion}`,
+          time: formatDateTime(new Date()),
+        });
+      }
+
+      lsSetAlerts(all);
+      return { ...flow };
+    }
+  }
+
+  return null;
+}
+
+export function mockGetAlertById(id: string): Alert | null {
+  checkEscalateL2();
+  const all = getAlerts();
+  const alert = all.find((a) => a.id === id);
+  return alert ? { ...alert } : null;
 }

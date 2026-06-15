@@ -1,0 +1,104 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+    background-color: #0A1628;
+    color: #E6F0FF;
+    font-family: '"Source Han Sans CN"', '"PingFang SC"', '"Microsoft YaHei"', system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-gradient-card border border-default rounded-lg backdrop-blur-sm transition-all duration-300;
+  }
+
+  .panel:hover {
+    @apply border-primary-500/50 shadow-glow-blue;
+  }
+
+  .panel-title {
+    @apply text-base font-bold;
+    padding-left: 12px;
+    border-left: 3px solid #1890FF;
+  }
+
+  .tech-grid {
+    background-image:
+      linear-gradient(rgba(24, 144, 255, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(24, 144, 255, 0.04) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  .scroll-area {
+    @apply h-full overflow-auto;
+  }
+
+  .btn-primary {
+    @apply text-white px-4 py-2 rounded transition-all duration-300;
+    background-image: linear-gradient(135deg, #1890FF 0%, #096DD9 100%);
+  }
+
+  .btn-primary:hover {
+    @apply -translate-y-px shadow-glow-blue;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent border border-default text-text-secondary transition-all duration-300 px-4 py-2 rounded;
+  }
+
+  .btn-ghost:hover {
+    @apply bg-primary-500/10 border-primary-500;
+  }
+
+  .badge {
+    @apply inline-block px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply bg-success-500/20 border border-success-500/40 text-success-400;
+  }
+
+  .badge-warning {
+    @apply bg-warning-500/20 border border-warning-500/40 text-warning-400;
+  }
+
+  .badge-danger {
+    @apply bg-danger-500/20 border border-danger-500/40 text-danger-400;
+  }
+
+  .badge-info {
+    @apply bg-primary-500/20 border border-primary-500/40 text-primary-400;
+  }
+}
+
+@layer utilities {
+  .content-auto {
+    content-visibility: auto;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(71, 114, 160, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(24, 144, 255, 0.4);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(24, 144, 255, 0.7);
+}
